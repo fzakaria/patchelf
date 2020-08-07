@@ -26,8 +26,7 @@ Makefile
 
 .direnv/
 .idea/
-
+result
 
 #Added by cargo
-
 /target
