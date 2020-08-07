@@ -25,3 +25,9 @@ Makefile
 /tests/*.so
 
 .direnv/
+.idea/
+
+
+#Added by cargo
+
+/target
