@@ -23,3 +23,5 @@ Makefile
 /tests/no-rpath
 /tests/no-rpath-*.sh
 /tests/*.so
+
+.direnv/
