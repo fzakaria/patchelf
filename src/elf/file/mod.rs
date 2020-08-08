@@ -43,34 +43,50 @@ impl std::error::Error for Error {
 type Result<T> = std::result::Result<T, Error>;
 
 // The size of the e_ident array.
-static EI_NIDENT: usize = 16;
+const EI_NIDENT: usize = 16;
 
 // Elf the magic number.
-static EI_MAG0: u8 = 0x7f;
-static EI_MAG1: u8 = b'E';
-static EI_MAG2: u8 = b'L';
-static EI_MAG3: u8 = b'F';
+const EI_MAG0: u8 = 0x7f;
+const EI_MAG1: u8 = b'E';
+const EI_MAG2: u8 = b'L';
+const EI_MAG3: u8 = b'F';
 
 #[derive(Debug, Copy, Clone)]
 struct Magic([u8; 4]);
 impl Magic {
+
+    fn new() -> Magic {
+        let inner: [u8; 4] = [0; 4];
+        Magic(inner)
+    }
+
     // Tests whether the magic value are correct according to the ELF header format
     fn is_valid(&self) -> bool {
         self.0 == [EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3]
     }
 
-    pub fn from_io<T: std::io::Read + std::io::Seek>(file: &mut T) -> Result<Magic> {
-        // seek to the start of the file always
-        file.seek(std::io::SeekFrom::Start(0))?;
-        let mut magic: [u8; 4] = [0; 4];
-        file.read_exact(&mut magic)?;
-        let magic = Magic(magic);
+    const fn len() -> usize {
+        4
+    }
+}
+
+impl Serde<Magic> for Magic {
+    fn from_io<T: std::io::Read + std::io::Seek>(file: &mut T) -> Result<Magic> {
+        let mut magic = Magic::new();
+        file.read_exact(&mut magic.0)?;
+
         if !magic.is_valid() {
             return Err(Error::Parse(String::from("Invalid ELF header, incorrect magic values")));
         }
         Ok(magic)
     }
+
+    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
+        Ok(output.write(&self.0)?)
+    }
 }
+
+type IdentRemaining = [u8; Identification::len() - Magic::len()];
 
 // the identifier for the header file format
 // This array of bytes specifies to interpret the file, independent
@@ -78,15 +94,34 @@ impl Magic {
 #[derive(Debug, Copy, Clone)]
 struct Identification {
     magic: Magic,
+    remaining: IdentRemaining
 }
 
 impl Identification {
+    fn new(magic: Magic) -> Identification {
+        Identification {
+            magic,
+            remaining: [0; Identification::len() - Magic::len()]
+        }
+    }
 
-    pub fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Identification> {
+    const fn len() -> usize {
+        EI_NIDENT
+    }
+}
+
+impl Serde<Identification> for Identification {
+
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Identification> {
         let magic = Magic::from_io(input)?;
-        Ok(Identification {
-            magic
-        })
+        let mut identification = Identification::new(magic);
+
+        input.read_exact(&mut identification.remaining)?;
+        Ok(identification)
+    }
+
+    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
+        Ok(self.magic.to_io(output)? + output.write(&self.remaining)?)
     }
 }
 
@@ -96,11 +131,22 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header> {
-        let ident = Identification::from_io(input)?;
-        Ok(Header {
+    fn new(ident: Identification) -> Header {
+        Header {
             ident
-        })
+        }
+    }
+}
+
+impl Serde<Header> for Header {
+
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header> {
+        let ident = Identification::from_io(input)?;
+        Ok(Header::new(ident))
+    }
+
+    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
+        self.ident.to_io(output)
     }
 }
 
@@ -110,20 +156,25 @@ pub struct File {
     remaining: Vec<u8>
 }
 
+impl File {
+    fn new(header: Header) -> File {
+        File {
+            header,
+            remaining: vec![0;0]
+        }
+    }
+}
+
 impl Serde<File> for File {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
         let header = Header::from_io(input)?;
-
-        let mut remaining = vec![0;0];
-        input.read_to_end(&mut remaining)?;
-        Ok(File {
-            header,
-            remaining
-        })
+        let mut file = File::new(header);
+        input.read_to_end(&mut file.remaining)?;
+        Ok(file)
     }
 
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        let amount = output.write(&self.header.ident.magic.0)? + output.write(&self.remaining)?;
+        let amount = self.header.to_io(output)? + output.write(&self.remaining)?;
         Ok(amount)
     }
 }
