@@ -1,4 +1,6 @@
+
 extern crate getopts;
+
 
 mod elf;
 
@@ -36,6 +38,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let path = &matches.free[0];
 
     let mut binary = std::fs::File::open(path)?;
+
 
     let elf = elf::file::File::from_io(&mut binary)?;
 
