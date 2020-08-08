@@ -125,9 +125,30 @@ impl Serde<Identification> for Identification {
     }
 }
 
+enum Type {
+    None = 0,
+    Relocatable = 1,
+    Executable = 2,
+    Dynamic = 3,
+    Core = 4
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct Header {
     ident: Identification,
+    e_type: Type,
+    machine: u16,
+    version: u32,
+    entry: _,
+    phoff: _,
+    shoff: _,
+    flags: u32,
+    ehsize: u16,
+    phentsize: u16,
+    phnumm: u16,
+    shentsize: u16,
+    shnum: u16,
+    shstrndx: u16
 }
 
 impl Header {
