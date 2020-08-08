@@ -35,9 +35,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let path = &matches.free[0];
 
-    let binary = std::fs::File::open(path)?;
+    let mut binary = std::fs::File::open(path)?;
 
-    let header = elf::file::Header::from_file(&binary)?;
+    let elf = elf::file::File::from_io(&mut binary)?;
 
     Ok(())
 }
