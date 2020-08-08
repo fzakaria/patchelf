@@ -1,4 +1,7 @@
-use std::io::{Seek, Read};
+pub trait Serde<R> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<R>;
+    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize>;
+}
 
 // our generic Elf file parsing error
 #[derive(Debug)]
@@ -38,7 +41,6 @@ impl std::error::Error for Error {
             Error::Parse(ref err) => &err,
         }
     }
-
 }
 
 // Define a generic alias for a `Result` with the error type `ParseIntError`.
@@ -58,7 +60,7 @@ struct Magic([u8; 4]);
 impl Magic {
     // Tests whether the magic value are correct according to the ELF header format
     fn is_valid(&self) -> bool {
-        self.0[0] == EI_MAG0 && self.0[1] == EI_MAG1 && self.0[2] == EI_MAG2 && self.0[3] == EI_MAG3
+        self.0 == [EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3]
     }
 
     pub fn from_io<T: std::io::Read + std::io::Seek>(file: &mut T) -> Result<Magic> {
@@ -112,8 +114,8 @@ pub struct File {
     remaining: Vec<u8>
 }
 
-impl File {
-    pub fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
+impl Serde<File> for File {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
         let header = Header::from_io(input)?;
 
         let mut remaining = vec![0;0];
@@ -122,5 +124,51 @@ impl File {
             header,
             remaining
         })
+    }
+
+    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
+        let amount = output.write(&self.header.ident.magic.0)? + output.write(&self.remaining)?;
+        Ok(amount)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    mod magic {
+        use super::*;
+        #[test]
+        fn from_io_valid() -> std::result::Result<(), Box<dyn std::error::Error>> {
+            let mut valid = std::io::Cursor::new([EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3]);
+            Magic::from_io(&mut valid)?;
+            Ok(())
+        }
+
+        #[test]
+        fn from_io_invalid() {
+            let mut valid = std::io::Cursor::new("not at all invalid");
+            let result = Magic::from_io(&mut valid);
+            assert!(result.is_err(), "expected error for invalid input");
+        }
+    }
+
+    mod file {
+        use super::*;
+
+        #[test]
+        fn round_trip() -> std::result::Result<(), Box<dyn std::error::Error>> {
+            let expected = include_bytes!("hello_world.o").to_vec();
+            let mut input = std::io::Cursor::new(&expected);
+            let parsed = File::from_io(&mut input)?;
+
+            let mut actual: Vec<u8> = vec![0; 0];
+            let mut output = std::io::Cursor::new(&mut actual);
+            let written = parsed.to_io(&mut output)?;
+
+            assert_eq!(expected.len(), written);
+            assert_eq!(expected, actual);
+            Ok(())
+        }
     }
 }

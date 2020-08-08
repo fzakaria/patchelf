@@ -4,6 +4,8 @@ extern crate getopts;
 
 mod elf;
 
+use elf::file::Serde;
+
 use getopts::Options;
 use std::env;
 use std::path::Path;
@@ -39,8 +41,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let mut binary = std::fs::File::open(path)?;
 
-
     let elf = elf::file::File::from_io(&mut binary)?;
+
+    let mut output = std::fs::File::create("/tmp/output")?;
+
+    elf.to_io(&mut output)?;
 
     Ok(())
 }
