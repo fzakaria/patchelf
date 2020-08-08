@@ -19,26 +19,22 @@ impl From<std::io::Error> for Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match *self {
+        match self {
             // Both underlying errors already impl `Display`, so we defer to
             // their implementations.
-            Error::IO(ref err) => write!(f, "IO error: {}", err),
-            Error::Parse(ref err) => write!(f, "Parse error: {}", err),
+            Error::IO(err) => write!(f, "IO error: {}", err),
+            Error::Parse(err) => write!(f, "Parse error: {}", err),
         }
     }
 }
 
 impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        // Both underlying errors already impl `Error`, so we defer to their
-        // implementations.
-        match *self {
-            Error::IO(ref err) => err.description(),
-            // Normally we can just write `err.description()`, but the error
-            // type has a concrete method called `description`, which conflicts
-            // with the trait method. For now, we must explicitly call
-            // `description` through the `Error` trait.
-            Error::Parse(ref err) => &err,
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            // Return the underlying IO error
+            Error::IO(err) => Some(err),
+            // There is no underlying error
+            Error::Parse(_) => None,
         }
     }
 }
