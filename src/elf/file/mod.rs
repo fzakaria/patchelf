@@ -2,8 +2,8 @@ use crate::endian;
 
 use std::io::Read;
 
-use num_derive::FromPrimitive;
-use num_traits::{FromPrimitive, PrimInt};
+use num_derive::{FromPrimitive, ToPrimitive};
+use num_traits::{FromPrimitive, ToPrimitive, PrimInt};
 
 pub trait Serde<R> {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<R>;
@@ -219,10 +219,19 @@ enum Version {
 }
 
 
-struct Pointer<T>(T) where T: PrimInt;
+trait Pointer {
 
-#[derive(Debug)]
-pub struct Header<T> where T: PrimInt {
+}
+
+impl Pointer for u32 {
+
+}
+
+impl Pointer for u64 {
+
+}
+
+pub struct Header {
     ident: Identification,
     // This member of the structure identifies the object file type
     e_type: Type,
@@ -232,17 +241,24 @@ pub struct Header<T> where T: PrimInt {
     // This member gives the virtual address to which the system
     // first transfers control, thus starting the process.  If the
     // file has no associated entry point, this member holds zero.
-    entry: Pointer<T>,
+    entry: Box<dyn Pointer>,
 }
 
-impl<T> Header<T> where T: PrimInt {
+impl std::fmt::Debug for Header {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        // TODO: fill me in
+        write!(fmt, "Header {{ }}")
+    }
+}
+
+impl Header {
     fn new(
         ident: Identification,
         e_type: Type,
         machine: Architecture,
         version: Version,
-        entry: Pointer<T>,
-    ) -> Header<T> {
+        entry: Box<dyn Pointer>,
+    ) -> Header {
         Header {
             ident,
             e_type,
@@ -253,8 +269,8 @@ impl<T> Header<T> where T: PrimInt {
     }
 }
 
-impl<R> Serde<Header<R>> for Header<R> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header<R>> {
+impl Serde<Header> for Header {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header> {
         let ident = Identification::from_io(input)?;
         let endian = match ident.data {
             Encoding::LittleEndian => endian::Reader::Little,
@@ -273,15 +289,15 @@ impl<R> Serde<Header<R>> for Header<R> {
 
         match ident.class {
             AddressFormat::ThirtyTwoBit => {
-                let entry = Pointer::new(endian.read_u32(input)?);
+                let entry = Box::new(endian.read_u32(input)?);
                 return Ok(
-                    Header::<R> { ident, e_type, machine, version, entry }
+                    Header { ident, e_type, machine, version, entry }
                 )
             },
             AddressFormat::SixtyFourBit => {
-                let entry = Pointer::new(endian.read_u64(input)?);
+                let entry = Box::new(endian.read_u64(input)?);
                 return Ok(
-                    Header::<R> { ident, e_type, machine, version, entry}
+                    Header { ident, e_type, machine, version, entry}
                 )
             },
             _ => panic!("should not be hit."),
@@ -289,17 +305,28 @@ impl<R> Serde<Header<R>> for Header<R> {
     }
 
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        self.get_ident().to_io(output)
+        self.ident.to_io(output)?;
+
+        let endian = match ident.data {
+            Encoding::LittleEndian => endian::Reader::Little,
+            Encoding::BigEndian => endian::Reader::Big,
+            _ => panic!("should not be hit."),
+        };
+
+        let e_type =
+            self.e_type.to_u8().ok_or(Error::Parse(String::from("Could not convert type")))?;
+        e_type.
+        Ok(0)
     }
 }
 
-pub struct File<T> where T: PrimInt {
-    header: Header<T>,
+pub struct File {
+    header: Header,
     remaining: Vec<u8>,
 }
 
-impl<T> File<T> {
-    fn new(header: Header<T>) -> File<T> {
+impl File{
+    fn new(header: Header) -> File {
         File {
             header,
             remaining: vec![0; 0],
@@ -307,8 +334,8 @@ impl<T> File<T> {
     }
 }
 
-impl<R> Serde<File<R>> for File<R> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File<R>> {
+impl Serde<File> for File {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
         let header = Header::from_io(input)?;
         let mut file = File::new(header);
         input.read_to_end(&mut file.remaining)?;
