@@ -4,6 +4,7 @@ use std::io::Read;
 
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive, PrimInt};
+use crate::endian::{Reader, Writer};
 
 pub trait Serde<R> {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<R>;
@@ -173,7 +174,19 @@ impl Serde<Identification> for Identification {
     }
 
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        Ok(self.magic.to_io(output)? + output.write(&self.remaining)?)
+        let mut written = self.magic.to_io(output)?;
+
+        let class : u8 = self.class.to_u8()
+            .ok_or(Error::Parse(String::from("Could not convert class")))?;
+        written += output.write(&[class])?;
+
+        let data : u8 = self.data.to_u8()
+            .ok_or(Error::Parse(String::from("Could not convert data")))?;
+        written += output.write(&[data])?;
+
+        written += output.write(&self.remaining)?;
+
+        Ok(written)
     }
 }
 
@@ -220,15 +233,25 @@ enum Version {
 
 
 trait Pointer {
-
+    fn to_bytes(&self, endian: &endian::Encoding) -> Vec<u8>;
 }
 
 impl Pointer for u32 {
-
+    fn to_bytes(&self, endian: &endian::Encoding) -> Vec<u8> {
+        match endian {
+            endian::Encoding::Little => self.to_le_bytes().to_vec(),
+            endian::Encoding::Big => self.to_be_bytes().to_vec(),
+        }
+    }
 }
 
 impl Pointer for u64 {
-
+    fn to_bytes(&self, endian: &endian::Encoding) -> Vec<u8> {
+        match endian {
+            endian::Encoding::Little => self.to_le_bytes().to_vec(),
+            endian::Encoding::Big => self.to_be_bytes().to_vec(),
+        }
+    }
 }
 
 pub struct Header {
@@ -273,8 +296,8 @@ impl Serde<Header> for Header {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header> {
         let ident = Identification::from_io(input)?;
         let endian = match ident.data {
-            Encoding::LittleEndian => endian::Reader::Little,
-            Encoding::BigEndian => endian::Reader::Big,
+            Encoding::LittleEndian => endian::Encoding::Little,
+            Encoding::BigEndian => endian::Encoding::Big,
             _ => panic!("should not be hit."),
         };
 
@@ -305,18 +328,32 @@ impl Serde<Header> for Header {
     }
 
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        self.ident.to_io(output)?;
+        let written = self.ident.to_io(output)?;
 
-        let endian = match ident.data {
-            Encoding::LittleEndian => endian::Reader::Little,
-            Encoding::BigEndian => endian::Reader::Big,
+        let endian = match self.ident.data {
+            Encoding::LittleEndian => endian::Encoding::Little,
+            Encoding::BigEndian => endian::Encoding::Big,
             _ => panic!("should not be hit."),
         };
 
-        let e_type =
-            self.e_type.to_u8().ok_or(Error::Parse(String::from("Could not convert type")))?;
-        e_type.
-        Ok(0)
+        let e_type = self.e_type.to_u16()
+                .ok_or(Error::Parse(String::from("Could not convert type")))?;
+
+        let machine = self.machine.to_u16()
+            .ok_or(Error::Parse(String::from("Could not convert machine")))?;
+
+        let version = self.version.to_u32()
+            .ok_or(Error::Parse(String::from("Could not convert version")))?;
+
+        let entry = self.entry.to_bytes(&endian);
+
+        endian.write_u16(e_type, output)?;
+        endian.write_u16(machine, output)?;
+        endian.write_u32(version, output)?;
+
+        let written = written + output.write(&entry)?;
+
+        Ok(written + 2 + 2 + 4)
     }
 }
 
