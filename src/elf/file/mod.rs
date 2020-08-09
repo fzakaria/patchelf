@@ -1,3 +1,11 @@
+use crate::elf::file::Error::Parse;
+use std::io::Read;
+
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
+
+use endian::Reader;
+
 pub trait Serde<R> {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<R>;
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize>;
@@ -7,7 +15,7 @@ pub trait Serde<R> {
 #[derive(Debug)]
 pub enum Error {
     IO(std::io::Error),
-    Parse(String)
+    Parse(String),
 }
 
 // Implement std::convert::From for Error; from io::Error
@@ -54,7 +62,6 @@ const EI_MAG3: u8 = b'F';
 #[derive(Debug, Copy, Clone)]
 struct Magic([u8; 4]);
 impl Magic {
-
     fn new() -> Magic {
         let inner: [u8; 4] = [0; 4];
         Magic(inner)
@@ -76,7 +83,9 @@ impl Serde<Magic> for Magic {
         file.read_exact(&mut magic.0)?;
 
         if !magic.is_valid() {
-            return Err(Error::Parse(String::from("Invalid ELF header, incorrect magic values")));
+            return Err(Error::Parse(String::from(
+                "Invalid ELF header, incorrect magic values",
+            )));
         }
         Ok(magic)
     }
@@ -88,20 +97,43 @@ impl Serde<Magic> for Magic {
 
 type IdentRemaining = [u8; Identification::len() - Magic::len()];
 
+#[derive(Debug, FromPrimitive, ToPrimitive)]
+#[repr(u8)]
+enum AddressFormat {
+    None,
+    ThirtyTwoBit,
+    SixtyFourBit,
+}
+
+#[derive(Debug, FromPrimitive, ToPrimitive)]
+#[repr(u8)]
+enum Encoding {
+    None,
+    TwoCompleteLittleEndian,
+    TwoCompleteBigEndian,
+}
+
 // the identifier for the header file format
 // This array of bytes specifies to interpret the file, independent
 // of the processor or the file's remaining contents.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 struct Identification {
+    // EI_MAGX: the magic number
     magic: Magic,
-    remaining: IdentRemaining
+    // EI_CLASS: The fifth byte identifies the architecture
+    class: AddressFormat,
+    // EI_DATA: The sixth byte specifies the data encoding of the processor-specific data in the file.
+    data: Encoding,
+    remaining: IdentRemaining,
 }
 
 impl Identification {
-    fn new(magic: Magic) -> Identification {
+    fn new(magic: Magic, class: AddressFormat, data: Encoding) -> Identification {
         Identification {
             magic,
-            remaining: [0; Identification::len() - Magic::len()]
+            class,
+            data,
+            remaining: [0; Identification::len() - Magic::len() - 2],
         }
     }
 
@@ -111,10 +143,31 @@ impl Identification {
 }
 
 impl Serde<Identification> for Identification {
-
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Identification> {
         let magic = Magic::from_io(input)?;
-        let mut identification = Identification::new(magic);
+
+        let mut bytes = input.bytes();
+        let class = bytes
+            .next()
+            .and_then(|result| result.ok())
+            .and_then(|byte| AddressFormat::from_u8(byte))
+            .ok_or(Parse(String::from("Could not read class type")))?;
+
+        if class == AddressFormat::None {
+            return Err(Parser(format!("Invalid address format: {}", clas)));
+        }
+
+        let data = bytes
+            .next()
+            .and_then(|result| result.ok())
+            .and_then(|byte| Encoding::from_u8(byte))
+            .ok_or(Parse(String::from("Could not read encoding type")))?;
+
+        if data == Encoding::None {
+            return Err(Parser(format!("Invalid encoding: {}", data)));
+        }
+
+        let mut identification = Identification::new(magic, class, data);
 
         input.read_exact(&mut identification.remaining)?;
         Ok(identification)
@@ -125,45 +178,120 @@ impl Serde<Identification> for Identification {
     }
 }
 
+#[repr(u16)]
+#[derive(Debug, FromPrimitive, ToPrimitive)]
 enum Type {
-    None = 0,
-    Relocatable = 1,
-    Executable = 2,
-    Dynamic = 3,
-    Core = 4
+    None,
+    Relocatable,
+    Executable,
+    Dynamic,
+    Core,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Header {
+#[repr(u16)]
+#[derive(Debug, FromPrimitive, ToPrimitive)]
+enum Architecture {
+    None,
+    M32,
+    SPARC,
+    I386,
+    M68K,
+    M88K,
+    I860,
+    MIPS,
+    PARISC,
+    SPARC32PLUS,
+    PPC,
+    PPC64,
+    S390,
+    ARM,
+    SH,
+    SPARCV9,
+    IA_64,
+    X86_64,
+    VAX,
+}
+
+#[derive(Debug, FromPrimitive, ToPrimitive)]
+enum Version {
+    None,
+    Current,
+}
+
+#[derive(Debug)]
+pub struct Header<T> {
     ident: Identification,
+    // This member of the structure identifies the object file type
     e_type: Type,
-    machine: u16,
-    version: u32,
-    entry: _,
-    phoff: _,
-    shoff: _,
+    //  This member specifies the required architecture for an individual file
+    machine: Architecture,
+    version: Version,
+    // This member gives the virtual address to which the system
+    // first transfers control, thus starting the process.  If the
+    // file has no associated entry point, this member holds zero.
+    entry: T,
+    phoff: T,
+    shoff: T,
     flags: u32,
     ehsize: u16,
     phentsize: u16,
     phnumm: u16,
     shentsize: u16,
     shnum: u16,
-    shstrndx: u16
+    shstrndx: u16,
 }
 
-impl Header {
-    fn new(ident: Identification) -> Header {
+impl<T> Header<T> {
+    fn new<T>(
+        ident: Identification,
+        e_type: Type,
+        machine: Architecture,
+        version: Version,
+        entry: T,
+        phoff: T,
+        shoff: T,
+        flags: u32,
+        ehsize: u16,
+        phentsize: u16,
+        phnumm: u16,
+        shentsize: u16,
+        shnum: u16,
+        shstrndx: u16,
+    ) -> Header<T> {
         Header {
-            ident
+            ident,
+            e_type,
+            machine,
+            version,
+            entry,
+            phoff,
+            shoff,
+            flags,
+            ehsize,
+            phentsize,
+            phnumm,
+            shentsize,
+            shnum,
+            shstrndx,
         }
     }
 }
 
-impl Serde<Header> for Header {
-
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header> {
+impl<Arch> Serde<Header<Arch>> for Header<Arch> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header<Arch>> {
         let ident = Identification::from_io(input)?;
-        Ok(Header::new(ident))
+        let endian = ident.data;
+
+        let mut cursor = std::io::Cursor::new(input);
+        let e_type = Type::from_u16(cursor)?;
+
+        let header = match ident.class {
+            AddressFormat::ThirtyTwoBit => Header { ident, e_type },
+            AddressFormat::SixtyFourBit => Header { ident, e_type },
+            _ => Err(Parser("Unknown address format")),
+        };
+
+        Ok(header)
     }
 
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
@@ -173,15 +301,15 @@ impl Serde<Header> for Header {
 
 #[derive(Debug, Clone)]
 pub struct File {
-    header: Header,
-    remaining: Vec<u8>
+    header: Header<T>,
+    remaining: Vec<u8>,
 }
 
 impl File {
-    fn new(header: Header) -> File {
+    fn new(header: Header<T>) -> File {
         File {
             header,
-            remaining: vec![0;0]
+            remaining: vec![0; 0],
         }
     }
 }
@@ -199,7 +327,6 @@ impl Serde<File> for File {
         Ok(amount)
     }
 }
-
 
 #[cfg(test)]
 mod tests {

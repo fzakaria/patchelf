@@ -1,8 +1,9 @@
-
+#[macro_use]
+extern crate num_derive;
 extern crate getopts;
 
-
 mod elf;
+mod endian;
 
 use elf::file::Serde;
 
