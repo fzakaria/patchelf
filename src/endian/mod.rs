@@ -7,6 +7,7 @@ pub enum Reader {
 }
 
 impl Reader {
+
     /// Read a primitive value with this endianness from the given source.
     pub fn read_u16<S>(&self, src: &mut S) -> Result<u16>
     where

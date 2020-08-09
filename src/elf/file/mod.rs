@@ -3,7 +3,7 @@ use crate::endian;
 use std::io::Read;
 
 use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
+use num_traits::{FromPrimitive, PrimInt};
 
 pub trait Serde<R> {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<R>;
@@ -218,13 +218,11 @@ enum Version {
     Current,
 }
 
-trait Header {
 
-    fn get_ident(&self) -> &Identification;
-}
+struct Pointer<T>(T) where T: PrimInt;
 
 #[derive(Debug)]
-pub struct ArchitectureSpecificHeader<T> {
+pub struct Header<T> {
     ident: Identification,
     // This member of the structure identifies the object file type
     e_type: Type,
@@ -234,18 +232,18 @@ pub struct ArchitectureSpecificHeader<T> {
     // This member gives the virtual address to which the system
     // first transfers control, thus starting the process.  If the
     // file has no associated entry point, this member holds zero.
-    entry: T,
+    entry: Pointer<T>,
 }
 
-impl<T> ArchitectureSpecificHeader<T> {
+impl<T> Header<T> where T: PrimInt {
     fn new(
         ident: Identification,
         e_type: Type,
         machine: Architecture,
         version: Version,
-        entry: T,
-    ) -> ArchitectureSpecificHeader<T> {
-        ArchitectureSpecificHeader {
+        entry: Pointer<T>,
+    ) -> Header<T> {
+        Header {
             ident,
             e_type,
             machine,
@@ -255,29 +253,8 @@ impl<T> ArchitectureSpecificHeader<T> {
     }
 }
 
-impl std::fmt::Debug for dyn Header {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        write!(fmt, "")
-    }
-}
-
-impl Header for ArchitectureSpecificHeader<u32> {
-
-    fn get_ident(&self) -> &Identification {
-        &self.ident
-    }
-
-}
-
-impl Header for ArchitectureSpecificHeader<u64> {
-
-    fn get_ident(&self) -> &Identification {
-        &self.ident
-    }
-}
-
-impl Serde<Box<dyn Header>> for Box<dyn Header> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Box<dyn Header>> {
+impl<T> Serde<Header<T>> for Header<T> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header<T>> {
         let ident = Identification::from_io(input)?;
         let endian = match ident.data {
             Encoding::LittleEndian => endian::Reader::Little,
@@ -296,19 +273,15 @@ impl Serde<Box<dyn Header>> for Box<dyn Header> {
 
         match ident.class {
             AddressFormat::ThirtyTwoBit => {
-                let entry = endian.read_u32(input)?;
+                let entry = Pointer::new(endian.read_u32(input)?);
                 return Ok(
-                    Box::new(
-                        ArchitectureSpecificHeader::<u32> { ident, e_type, machine, version, entry }
-                    )
+                    Header::<T> { ident, e_type, machine, version, entry }
                 )
             },
             AddressFormat::SixtyFourBit => {
-                let entry = endian.read_u64(input)?;
+                let entry = Pointer::new(endian.read_u64(input)?);
                 return Ok(
-                    Box::new(
-                        ArchitectureSpecificHeader::<u64> { ident, e_type, machine, version, entry}
-                    )
+                    Header::<T> { ident, e_type, machine, version, entry}
                 )
             },
             _ => panic!("should not be hit."),
@@ -320,13 +293,13 @@ impl Serde<Box<dyn Header>> for Box<dyn Header> {
     }
 }
 
-pub struct File {
-    header: Box<dyn Header>,
+pub struct File<T> {
+    header: Header<T>,
     remaining: Vec<u8>,
 }
 
-impl File {
-    fn new(header: Box<dyn Header>) -> File {
+impl<T> File<T> {
+    fn new(header: Header<T>) -> File<T> {
         File {
             header,
             remaining: vec![0; 0],
@@ -334,9 +307,9 @@ impl File {
     }
 }
 
-impl Serde<File> for File {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
-        let header = Box::<dyn Header>::from_io(input)?;
+impl<T> Serde<File<T>> for File<T> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File<T>> {
+        let header = Header::from_io(input)?;
         let mut file = File::new(header);
         input.read_to_end(&mut file.remaining)?;
         Ok(file)
