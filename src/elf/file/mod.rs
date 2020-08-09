@@ -1,10 +1,9 @@
-use crate::elf::file::Error::Parse;
+use crate::endian;
+
 use std::io::Read;
 
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-
-use endian::Reader;
 
 pub trait Serde<R> {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<R>;
@@ -95,9 +94,9 @@ impl Serde<Magic> for Magic {
     }
 }
 
-type IdentRemaining = [u8; Identification::len() - Magic::len()];
+type IdentRemaining = [u8; Identification::len() - Magic::len() - 2];
 
-#[derive(Debug, FromPrimitive, ToPrimitive)]
+#[derive(Debug, PartialEq, FromPrimitive, ToPrimitive)]
 #[repr(u8)]
 enum AddressFormat {
     None,
@@ -105,12 +104,12 @@ enum AddressFormat {
     SixtyFourBit,
 }
 
-#[derive(Debug, FromPrimitive, ToPrimitive)]
+#[derive(Debug, PartialEq, FromPrimitive, ToPrimitive)]
 #[repr(u8)]
 enum Encoding {
     None,
-    TwoCompleteLittleEndian,
-    TwoCompleteBigEndian,
+    LittleEndian,
+    BigEndian,
 }
 
 // the identifier for the header file format
@@ -151,20 +150,20 @@ impl Serde<Identification> for Identification {
             .next()
             .and_then(|result| result.ok())
             .and_then(|byte| AddressFormat::from_u8(byte))
-            .ok_or(Parse(String::from("Could not read class type")))?;
+            .ok_or(Error::Parse(String::from("Could not read class type")))?;
 
         if class == AddressFormat::None {
-            return Err(Parser(format!("Invalid address format: {}", clas)));
+            return Err(Error::Parse(format!("Invalid address format: {:?}", class)));
         }
 
         let data = bytes
             .next()
             .and_then(|result| result.ok())
             .and_then(|byte| Encoding::from_u8(byte))
-            .ok_or(Parse(String::from("Could not read encoding type")))?;
+            .ok_or(Error::Parse(String::from("Could not read encoding type")))?;
 
         if data == Encoding::None {
-            return Err(Parser(format!("Invalid encoding: {}", data)));
+            return Err(Error::Parse(format!("Invalid encoding: {:?}", data)));
         }
 
         let mut identification = Identification::new(magic, class, data);
@@ -212,6 +211,7 @@ enum Architecture {
     VAX,
 }
 
+#[repr(u32)]
 #[derive(Debug, FromPrimitive, ToPrimitive)]
 enum Version {
     None,
@@ -230,33 +230,15 @@ pub struct Header<T> {
     // first transfers control, thus starting the process.  If the
     // file has no associated entry point, this member holds zero.
     entry: T,
-    phoff: T,
-    shoff: T,
-    flags: u32,
-    ehsize: u16,
-    phentsize: u16,
-    phnumm: u16,
-    shentsize: u16,
-    shnum: u16,
-    shstrndx: u16,
 }
 
 impl<T> Header<T> {
-    fn new<T>(
+    fn new(
         ident: Identification,
         e_type: Type,
         machine: Architecture,
         version: Version,
         entry: T,
-        phoff: T,
-        shoff: T,
-        flags: u32,
-        ehsize: u16,
-        phentsize: u16,
-        phnumm: u16,
-        shentsize: u16,
-        shnum: u16,
-        shstrndx: u16,
     ) -> Header<T> {
         Header {
             ident,
@@ -264,15 +246,6 @@ impl<T> Header<T> {
             machine,
             version,
             entry,
-            phoff,
-            shoff,
-            flags,
-            ehsize,
-            phentsize,
-            phnumm,
-            shentsize,
-            shnum,
-            shstrndx,
         }
     }
 }
@@ -280,18 +253,36 @@ impl<T> Header<T> {
 impl<Arch> Serde<Header<Arch>> for Header<Arch> {
     fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header<Arch>> {
         let ident = Identification::from_io(input)?;
-        let endian = ident.data;
-
-        let mut cursor = std::io::Cursor::new(input);
-        let e_type = Type::from_u16(cursor)?;
-
-        let header = match ident.class {
-            AddressFormat::ThirtyTwoBit => Header { ident, e_type },
-            AddressFormat::SixtyFourBit => Header { ident, e_type },
-            _ => Err(Parser("Unknown address format")),
+        let endian = match ident.data {
+            Encoding::LittleEndian => endian::Reader::Little,
+            Encoding::BigEndian => endian::Reader::Big,
+            _ => panic!("should not be hit."),
         };
 
-        Ok(header)
+        let e_type = Type::from_u16(endian.read_u16(input)?)
+            .ok_or(Error::Parse(String::from("Could not read type")))?;
+
+        let machine = Architecture::from_u16(endian.read_u16(input)?)
+            .ok_or(Error::Parse(String::from("Could not read machine")))?;
+
+        let version = Version::from_u32(endian.read_u32(input)?)
+            .ok_or(Error::Parse(String::from("Could not read version")))?;
+
+        match ident.class {
+            AddressFormat::ThirtyTwoBit => {
+                let entry = endian.read_u32(input)?;
+                return Ok(
+                    Header::<u32> { ident, e_type, machine, version, entry }
+                )
+            },
+            AddressFormat::SixtyFourBit => {
+                let entry = endian.read_u64(input)?;
+                return Ok(
+                    Header::<u64> { ident, e_type, machine, version, entry}
+                )
+            },
+            _ => panic!("should not be hit."),
+        };
     }
 
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
@@ -300,13 +291,13 @@ impl<Arch> Serde<Header<Arch>> for Header<Arch> {
 }
 
 #[derive(Debug, Clone)]
-pub struct File {
+pub struct File<T> {
     header: Header<T>,
     remaining: Vec<u8>,
 }
 
-impl File {
-    fn new(header: Header<T>) -> File {
+impl<T> File<T> {
+    fn new(header: Header<T>) -> File<T> {
         File {
             header,
             remaining: vec![0; 0],
@@ -314,8 +305,8 @@ impl File {
     }
 }
 
-impl Serde<File> for File {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
+impl<Arch> Serde<File<Arch>> for File<Arch> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File<Arch>> {
         let header = Header::from_io(input)?;
         let mut file = File::new(header);
         input.read_to_end(&mut file.remaining)?;
