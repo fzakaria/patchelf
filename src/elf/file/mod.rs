@@ -222,7 +222,7 @@ enum Version {
 struct Pointer<T>(T) where T: PrimInt;
 
 #[derive(Debug)]
-pub struct Header<T> {
+pub struct Header<T> where T: PrimInt {
     ident: Identification,
     // This member of the structure identifies the object file type
     e_type: Type,
@@ -253,8 +253,8 @@ impl<T> Header<T> where T: PrimInt {
     }
 }
 
-impl<T> Serde<Header<T>> for Header<T> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header<T>> {
+impl<R> Serde<Header<R>> for Header<R> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header<R>> {
         let ident = Identification::from_io(input)?;
         let endian = match ident.data {
             Encoding::LittleEndian => endian::Reader::Little,
@@ -275,13 +275,13 @@ impl<T> Serde<Header<T>> for Header<T> {
             AddressFormat::ThirtyTwoBit => {
                 let entry = Pointer::new(endian.read_u32(input)?);
                 return Ok(
-                    Header::<T> { ident, e_type, machine, version, entry }
+                    Header::<R> { ident, e_type, machine, version, entry }
                 )
             },
             AddressFormat::SixtyFourBit => {
                 let entry = Pointer::new(endian.read_u64(input)?);
                 return Ok(
-                    Header::<T> { ident, e_type, machine, version, entry}
+                    Header::<R> { ident, e_type, machine, version, entry}
                 )
             },
             _ => panic!("should not be hit."),
@@ -293,7 +293,7 @@ impl<T> Serde<Header<T>> for Header<T> {
     }
 }
 
-pub struct File<T> {
+pub struct File<T> where T: PrimInt {
     header: Header<T>,
     remaining: Vec<u8>,
 }
@@ -307,8 +307,8 @@ impl<T> File<T> {
     }
 }
 
-impl<T> Serde<File<T>> for File<T> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File<T>> {
+impl<R> Serde<File<R>> for File<R> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File<R>> {
         let header = Header::from_io(input)?;
         let mut file = File::new(header);
         input.read_to_end(&mut file.remaining)?;
