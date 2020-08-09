@@ -190,25 +190,25 @@ enum Type {
 #[repr(u16)]
 #[derive(Debug, FromPrimitive, ToPrimitive)]
 enum Architecture {
-    None,
-    M32,
-    SPARC,
-    I386,
-    M68K,
-    M88K,
-    I860,
-    MIPS,
-    PARISC,
-    SPARC32PLUS,
-    PPC,
-    PPC64,
-    S390,
-    ARM,
-    SH,
-    SPARCV9,
-    IA_64,
-    X86_64,
-    VAX,
+    None = 0,
+    M32 = 1,
+    SPARC = 2,
+    I386 = 3,
+    M68K = 4,
+    M88K = 5,
+    I860 = 7,
+    MIPS = 8,
+    PARISC = 9,
+    SPARC32PLUS = 18,
+    PPC = 20,
+    PPC64 = 21,
+    S390 = 22,
+    ARM = 40,
+    SH = 42,
+    SPARCV9 = 43,
+    IA_64 = 50,
+    X86_64 = 62,
+    VAX = 75,
 }
 
 #[repr(u32)]
@@ -218,8 +218,13 @@ enum Version {
     Current,
 }
 
+trait Header {
+
+    fn get_ident(&self) -> &Identification;
+}
+
 #[derive(Debug)]
-pub struct Header<T> {
+pub struct ArchitectureSpecificHeader<T> {
     ident: Identification,
     // This member of the structure identifies the object file type
     e_type: Type,
@@ -232,15 +237,15 @@ pub struct Header<T> {
     entry: T,
 }
 
-impl<T> Header<T> {
+impl<T> ArchitectureSpecificHeader<T> {
     fn new(
         ident: Identification,
         e_type: Type,
         machine: Architecture,
         version: Version,
         entry: T,
-    ) -> Header<T> {
-        Header {
+    ) -> ArchitectureSpecificHeader<T> {
+        ArchitectureSpecificHeader {
             ident,
             e_type,
             machine,
@@ -250,8 +255,29 @@ impl<T> Header<T> {
     }
 }
 
-impl<Arch> Serde<Header<Arch>> for Header<Arch> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header<Arch>> {
+impl std::fmt::Debug for dyn Header {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(fmt, "")
+    }
+}
+
+impl Header for ArchitectureSpecificHeader<u32> {
+
+    fn get_ident(&self) -> &Identification {
+        &self.ident
+    }
+
+}
+
+impl Header for ArchitectureSpecificHeader<u64> {
+
+    fn get_ident(&self) -> &Identification {
+        &self.ident
+    }
+}
+
+impl Serde<Box<dyn Header>> for Box<dyn Header> {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Box<dyn Header>> {
         let ident = Identification::from_io(input)?;
         let endian = match ident.data {
             Encoding::LittleEndian => endian::Reader::Little,
@@ -272,13 +298,17 @@ impl<Arch> Serde<Header<Arch>> for Header<Arch> {
             AddressFormat::ThirtyTwoBit => {
                 let entry = endian.read_u32(input)?;
                 return Ok(
-                    Header::<u32> { ident, e_type, machine, version, entry }
+                    Box::new(
+                        ArchitectureSpecificHeader::<u32> { ident, e_type, machine, version, entry }
+                    )
                 )
             },
             AddressFormat::SixtyFourBit => {
                 let entry = endian.read_u64(input)?;
                 return Ok(
-                    Header::<u64> { ident, e_type, machine, version, entry}
+                    Box::new(
+                        ArchitectureSpecificHeader::<u64> { ident, e_type, machine, version, entry}
+                    )
                 )
             },
             _ => panic!("should not be hit."),
@@ -286,18 +316,17 @@ impl<Arch> Serde<Header<Arch>> for Header<Arch> {
     }
 
     fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        self.ident.to_io(output)
+        self.get_ident().to_io(output)
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct File<T> {
-    header: Header<T>,
+pub struct File {
+    header: Box<dyn Header>,
     remaining: Vec<u8>,
 }
 
-impl<T> File<T> {
-    fn new(header: Header<T>) -> File<T> {
+impl File {
+    fn new(header: Box<dyn Header>) -> File {
         File {
             header,
             remaining: vec![0; 0],
@@ -305,9 +334,9 @@ impl<T> File<T> {
     }
 }
 
-impl<Arch> Serde<File<Arch>> for File<Arch> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File<Arch>> {
-        let header = Header::from_io(input)?;
+impl Serde<File> for File {
+    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
+        let header = Box::<dyn Header>::from_io(input)?;
         let mut file = File::new(header);
         input.read_to_end(&mut file.remaining)?;
         Ok(file)

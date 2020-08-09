@@ -8,7 +8,7 @@ pub enum Reader {
 
 impl Reader {
     /// Read a primitive value with this endianness from the given source.
-    pub fn read_u16<S>(&self, mut src: S) -> Result<u16>
+    pub fn read_u16<S>(&self, src: &mut S) -> Result<u16>
     where
         S: Read,
     {
@@ -22,7 +22,7 @@ impl Reader {
     }
 
     /// Read a primitive value with this endianness from the given source.
-    pub fn read_u32<S>(&self, mut src: S) -> Result<u32>
+    pub fn read_u32<S>(&self, src: &mut S) -> Result<u32>
         where
             S: Read,
     {
@@ -36,7 +36,7 @@ impl Reader {
     }
 
     /// Read a primitive value with this endianness from the given source.
-    pub fn read_u64<S>(&self, mut src: S) -> Result<u64>
+    pub fn read_u64<S>(&self, src: &mut S) -> Result<u64>
         where
             S: Read,
     {
