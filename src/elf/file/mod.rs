@@ -258,6 +258,11 @@ pub struct Header {
     // Note: We up-size this to u64 to simplify the type system, but it will serialize according
     //       to the address format
     entry: u64,
+    // This member holds the program header table's file offset in bytes.
+    // If the file has no program header table, this member holds zero.
+    // Note: We up-size this to u64 to simplify the type system, but it will serialize according
+    //       to the address format
+    phoff: u64
 }
 
 impl Header {
@@ -267,6 +272,7 @@ impl Header {
         machine: Architecture,
         version: Version,
         entry: u64,
+        phoff: u64
     ) -> Header {
         Header {
             ident,
@@ -274,11 +280,44 @@ impl Header {
             machine,
             version,
             entry,
+            phoff
+        }
+    }
+}
+
+impl Header {
+
+
+}
+
+// Read the next input either as 32bit or 64bit according to the Identification
+fn architecture_aware_read<T: std::io::Read + std::io::Seek>(ident: &Identification, endian: &endian::Encoding, input: &mut T) -> Result<u64> {
+    match ident.class {
+        AddressFormat::None => return Err(Error::Parse(String::from("Could not read version"))),
+        AddressFormat::ThirtyTwoBit => endian.read_u32(input)
+            .map(|v| v as u64).map_err(|err| err.into()),
+        AddressFormat::SixtyFourBit => endian.read_u64(input)
+            .map_err(|err| err.into()),
+    }
+}
+
+// Write the vale either as 32bit or 64bit according to the Identification
+fn architecture_aware_write<T: std::io::Write>(ident: &Identification, value: u64, endian: &endian::Encoding, output: &mut T) -> Result<usize> {
+    match ident.class {
+        AddressFormat::None => return Err(Error::Parse(String::from("Could not write version"))),
+        AddressFormat::ThirtyTwoBit => {
+            endian.write_u32(value as u32, output)
+                .map(|_| 4).map_err(|err| err.into())
+        }
+        AddressFormat::SixtyFourBit => {
+            endian.write_u64(value, output)
+                .map(|_| 8).map_err(|err| err.into())
         }
     }
 }
 
 impl Serde<Header> for Header {
+
     fn from_io<T: std::io::Read + std::io::Seek>(
         order: &endian::Encoding,
         input: &mut T,
@@ -299,11 +338,9 @@ impl Serde<Header> for Header {
         let version = Version::from_u32(endian.read_u32(input)?)
             .ok_or(Error::Parse(String::from("Could not read version")))?;
 
-        let entry = match ident.class {
-            AddressFormat::None => return Err(Error::Parse(String::from("Could not read version"))),
-            AddressFormat::ThirtyTwoBit => endian.read_u32(input).map(|v| v as u64),
-            AddressFormat::SixtyFourBit => endian.read_u64(input),
-        }?;
+        let entry = architecture_aware_read(&ident, &endian, input)?;
+
+        let phoff = architecture_aware_read(&ident, &endian, input)?;
 
         Ok(Header {
             ident,
@@ -311,6 +348,7 @@ impl Serde<Header> for Header {
             machine,
             version,
             entry,
+            phoff
         })
     }
 
@@ -342,15 +380,9 @@ impl Serde<Header> for Header {
         endian.write_u16(machine, output)?;
         endian.write_u32(version, output)?;
 
-        written += match self.ident.class {
-            AddressFormat::None => return Err(Error::Parse(String::from("Could not write version"))),
-            AddressFormat::ThirtyTwoBit => {
-                endian.write_u32(self.entry as u32, output).map(|_| 4)
-            }
-            AddressFormat::SixtyFourBit => {
-                endian.write_u64(self.entry, output).map(|_| 8)
-            }
-        }?;
+        written += architecture_aware_write(&self.ident, self.entry, &endian, output)?;
+
+        written += architecture_aware_write(&self.ident, self.phoff, &endian, output)?;
 
         Ok(written + 2 + 2 + 4)
     }
