@@ -349,12 +349,12 @@ impl<R> Serde<Header<R>> for Header<R> where R: PrimInt + FromPrimitive {
         let version = self.version.to_u32()
             .ok_or(Error::Parse(String::from("Could not convert version")))?;
 
-        written += self.entry.to_io(order, output)?;
-
         endian.write_u16(e_type, output)?;
         endian.write_u16(machine, output)?;
         endian.write_u32(version, output)?;
 
+        written += self.entry.to_io(order, output)?;
+        
         Ok(written + 2 + 2 + 4)
     }
 }
