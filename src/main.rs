@@ -21,24 +21,15 @@ fn print_usage(program: &str, opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
-fn parse_elf_file<T>(file: &mut std::fs::File) -> std::result::Result<elf::file::File<T>, Box<dyn std::error::Error>>
-where T: PrimInt + FromPrimitive
-{
+fn handle_elf_file<T>(file: elf::file::File<T>) -> std::result::Result<(), Box<dyn std::error::Error>>
+where T: PrimInt + FromPrimitive {
     let encoding = endian::Encoding::Any;
 
-    // red the header first
-    let identification = elf::file::Identification::from_io(&encoding, file)?;
-    // reset the file IO read
-    file.seek(SeekFrom::Start(0))?;
+    let mut output = std::fs::File::create("/tmp/output")?;
 
-    // the endian at the start of the file read does not matter; so just set it to native endian
-    let elf: elf::file::File<T> = match identification.class {
-        elf::file::AddressFormat::None => panic!("This should not happen after a successful parse"),
-        elf::file::AddressFormat::ThirtyTwoBit => elf::file::File::<u32>::from_io(&encoding, file)?,
-        elf::file::AddressFormat::SixtyFourBit => elf::file::File::<u64>::from_io(&encoding, file)?,
-    };
+    file.to_io(&encoding, &mut output)?;
 
-    Ok(elf)
+    Ok(())
 }
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -66,12 +57,19 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let path = &matches.free[0];
 
     let mut binary = std::fs::File::open(path)?;
-    let elf = parse_elf_file(&mut binary)?;
-
-    let mut output = std::fs::File::create("/tmp/output")?;
 
     let encoding = endian::Encoding::Any;
-    elf.to_io(&encoding, &mut output)?;
+
+    // red the header first
+    let identification = elf::file::Identification::from_io(&encoding, &mut binary)?;
+    // reset the file IO read
+    binary.seek(SeekFrom::Start(0))?;
+
+    match identification.class {
+        elf::file::AddressFormat::None => panic!("This should not happen after a successful parse"),
+        elf::file::AddressFormat::ThirtyTwoBit => handle_elf_file(elf::file::File::<u32>::from_io(&encoding, &mut binary)?)?,
+        elf::file::AddressFormat::SixtyFourBit => handle_elf_file(elf::file::File::<u32>::from_io(&encoding, &mut binary)?)?,
+    };
 
     Ok(())
 }
