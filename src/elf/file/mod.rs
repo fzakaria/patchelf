@@ -262,7 +262,10 @@ pub struct Header {
     // If the file has no program header table, this member holds zero.
     // Note: We up-size this to u64 to simplify the type system, but it will serialize according
     //       to the address format
-    phoff: u64
+    phoff: u64,
+    // This member holds the section header table's file offset in bytes.  If the file has no
+    // section header table, this member holds zero.
+    shoff: u64,
 }
 
 impl Header {
@@ -272,7 +275,8 @@ impl Header {
         machine: Architecture,
         version: Version,
         entry: u64,
-        phoff: u64
+        phoff: u64,
+        shoff: u64,
     ) -> Header {
         Header {
             ident,
@@ -280,7 +284,8 @@ impl Header {
             machine,
             version,
             entry,
-            phoff
+            phoff,
+            shoff,
         }
     }
 }
@@ -342,13 +347,16 @@ impl Serde<Header> for Header {
 
         let phoff = architecture_aware_read(&ident, &endian, input)?;
 
+        let shoff = architecture_aware_read(&ident, &endian, input)?;
+
         Ok(Header {
             ident,
             e_type,
             machine,
             version,
             entry,
-            phoff
+            phoff,
+            shoff,
         })
     }
 
@@ -383,6 +391,8 @@ impl Serde<Header> for Header {
         written += architecture_aware_write(&self.ident, self.entry, &endian, output)?;
 
         written += architecture_aware_write(&self.ident, self.phoff, &endian, output)?;
+
+        written += architecture_aware_write(&self.ident, self.shoff, &endian, output)?;
 
         Ok(written + 2 + 2 + 4)
     }
