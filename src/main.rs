@@ -1,15 +1,18 @@
 #[macro_use]
 extern crate num_derive;
 extern crate getopts;
+extern crate byteorder;
 
 mod elf;
 mod endian;
 
 use elf::file::Serde;
+use elf::file::File;
 
 use getopts::Options;
 use std::env;
 use std::path::Path;
+use byteorder::LittleEndian;
 
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {} FILENAME [options]", program);
@@ -42,11 +45,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let mut binary = std::fs::File::open(path)?;
 
-    let elf = elf::file::File::from_io(&mut binary)?;
+    let encoding = endian::Encoding::Any;
+
+    // the endian at the start of the file read does not matter; so just set it to native endian
+    let elf: File<u32> = elf::file::File::from_io(&encoding, &mut binary)?;
 
     let mut output = std::fs::File::create("/tmp/output")?;
 
-    elf.to_io(&mut output)?;
+    elf.to_io(&encoding, &mut output)?;
 
     Ok(())
 }

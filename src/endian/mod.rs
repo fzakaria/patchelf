@@ -1,4 +1,11 @@
 use std::io::{Read, Result, Seek, Write};
+use byteorder::{ByteOrder, WriteBytesExt, ReadBytesExt, LittleEndian, BigEndian, NativeEndian};
+
+pub enum Encoding {
+    Little,
+    Big,
+    Any
+}
 
 pub trait Reader {
     fn read_u16<S>(&self, src: &mut S) -> Result<u16> where S: Read;
@@ -6,6 +13,7 @@ pub trait Reader {
     fn read_u64<S>(&self, src: &mut S) -> Result<u64> where S: Read;
 }
 
+// This trait allows ByteOrder themselves to be dynamically
 pub trait Writer {
     fn write_u8<S>(&self, value: u8, target: &mut S) -> Result<()> where S: Write;
     fn write_u16<S>(&self, value: u16, target: &mut S) -> Result<()> where S: Write;
@@ -13,40 +21,31 @@ pub trait Writer {
 
 }
 
-
-#[derive(Debug)]
-pub enum Encoding {
-    Little,
-    Big,
-}
-
 impl Writer for Encoding {
 
     fn write_u8<S>(&self, value: u8, target: &mut S) -> Result<()>
         where S: Write {
-        target.write_all(&[value])
+        target.write_u8(value)
     }
 
     fn write_u16<S>(&self, value: u16, target: &mut S) -> Result<()>
         where S: Write,
     {
-        let bytes = match *self {
-            Encoding::Little => value.to_le_bytes(),
-            Encoding::Big => value.to_be_bytes(),
-        };
-
-        target.write_all(&bytes)
+        match *self {
+            Encoding::Little => target.write_u16::<LittleEndian>(value),
+            Encoding::Big => target.write_u16::<BigEndian>(value),
+            Encoding::Any => target.write_u16::<NativeEndian>(value),
+        }
     }
 
     fn write_u32<S>(&self, value: u32, target: &mut S) -> Result<()>
         where S: Write,
     {
-        let bytes = match *self {
-            Encoding::Little => value.to_le_bytes(),
-            Encoding::Big => value.to_be_bytes(),
-        };
-
-        target.write_all(&bytes)
+        match *self {
+            Encoding::Little => target.write_u32::<LittleEndian>(value),
+            Encoding::Big => target.write_u32::<BigEndian>(value),
+            Encoding::Any => target.write_u32::<NativeEndian>(value),
+        }
     }
 }
 
@@ -57,13 +56,11 @@ impl Reader for Encoding {
     where
         S: Read,
     {
-        let mut buf = [0; 2];
-        src.read_exact(&mut buf)?;
-
-        Ok(match *self {
-            Encoding::Little => u16::from_le_bytes(buf),
-            Encoding::Big => u16::from_be_bytes(buf),
-        })
+        match *self {
+            Encoding::Little => src.read_u16::<LittleEndian>(),
+            Encoding::Big => src.read_u16::<BigEndian>(),
+            Encoding::Any => src.read_u16::<NativeEndian>(),
+        }
     }
 
     /// Read a primitive value with this endianness from the given source.
@@ -71,13 +68,11 @@ impl Reader for Encoding {
         where
             S: Read,
     {
-        let mut buf = [0; 4];
-        src.read_exact(&mut buf)?;
-
-        Ok(match *self {
-            Encoding::Little => u32::from_le_bytes(buf),
-            Encoding::Big => u32::from_be_bytes(buf),
-        })
+        match *self {
+            Encoding::Little => src.read_u32::<LittleEndian>(),
+            Encoding::Big => src.read_u32::<BigEndian>(),
+            Encoding::Any => src.read_u32::<NativeEndian>(),
+        }
     }
 
     /// Read a primitive value with this endianness from the given source.
@@ -85,13 +80,11 @@ impl Reader for Encoding {
         where
             S: Read,
     {
-        let mut buf = [0; 8];
-        src.read_exact(&mut buf)?;
-
-        Ok(match *self {
-            Encoding::Little => u64::from_le_bytes(buf),
-            Encoding::Big => u64::from_be_bytes(buf),
-        })
+        match *self {
+            Encoding::Little => src.read_u64::<LittleEndian>(),
+            Encoding::Big => src.read_u64::<BigEndian>(),
+            Encoding::Any => src.read_u64::<NativeEndian>(),
+        }
     }
 }
 

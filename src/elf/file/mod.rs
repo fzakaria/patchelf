@@ -5,10 +5,12 @@ use std::io::Read;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive, PrimInt};
 use crate::endian::{Reader, Writer};
+use crate::elf::file::Error::Parse;
+use byteorder::ByteOrder;
 
 pub trait Serde<R> {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<R>;
-    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize>;
+    fn from_io<T: std::io::Read + std::io::Seek>(order: &endian::Encoding, input: &mut T) -> Result<R>;
+    fn to_io<T: std::io::Write>(&self, order: &endian::Encoding, output: &mut T) -> Result<usize>;
 }
 
 // our generic Elf file parsing error
@@ -78,9 +80,9 @@ impl Magic {
 }
 
 impl Serde<Magic> for Magic {
-    fn from_io<T: std::io::Read + std::io::Seek>(file: &mut T) -> Result<Magic> {
+    fn from_io<T: std::io::Read + std::io::Seek>(order: &endian::Encoding, input: &mut T) -> Result<Magic> {
         let mut magic = Magic::new();
-        file.read_exact(&mut magic.0)?;
+        input.read_exact(&mut magic.0)?;
 
         if !magic.is_valid() {
             return Err(Error::Parse(String::from(
@@ -90,7 +92,7 @@ impl Serde<Magic> for Magic {
         Ok(magic)
     }
 
-    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
+    fn to_io<T: std::io::Write>(&self, order: &endian::Encoding, output: &mut T) -> Result<usize> {
         Ok(output.write(&self.0)?)
     }
 }
@@ -143,8 +145,8 @@ impl Identification {
 }
 
 impl Serde<Identification> for Identification {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Identification> {
-        let magic = Magic::from_io(input)?;
+    fn from_io<T: std::io::Read + std::io::Seek>(order: &endian::Encoding, input: &mut T) -> Result<Identification> {
+        let magic = Magic::from_io(order, input)?;
 
         let mut bytes = input.bytes();
         let class = bytes
@@ -173,8 +175,8 @@ impl Serde<Identification> for Identification {
         Ok(identification)
     }
 
-    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        let mut written = self.magic.to_io(output)?;
+    fn to_io<T: std::io::Write>(&self, order: &endian::Encoding, output: &mut T) -> Result<usize> {
+        let mut written = self.magic.to_io(order, output)?;
 
         let class : u8 = self.class.to_u8()
             .ok_or(Error::Parse(String::from("Could not convert class")))?;
@@ -231,30 +233,36 @@ enum Version {
     Current,
 }
 
+#[derive(Debug)]
+struct Pointer<T>(T) where T: PrimInt + FromPrimitive;
 
-trait Pointer {
-    fn to_bytes(&self, endian: &endian::Encoding) -> Vec<u8>;
-}
+impl<R> Serde<Pointer<R>> for Pointer<R> where R: PrimInt + FromPrimitive {
+    fn from_io<T: std::io::Read + std::io::Seek>(order: &endian::Encoding, input: &mut T) -> Result<Pointer<R>> {
+        // Only parse up to 64 bits.
+        let width = R::zero().count_zeros();
+        let value = match width {
+            32 => {
+                let value = order.read_u32(input)?;
+                R::from_u32(value)
+            },
+            64 => {
+                let value = order.read_u64(input)?;
+                R::from_u64(value)
+            }
+            _ => None
+        }.ok_or(Parse(String::from("Could not convert to primitive type")))?;
 
-impl Pointer for u32 {
-    fn to_bytes(&self, endian: &endian::Encoding) -> Vec<u8> {
-        match endian {
-            endian::Encoding::Little => self.to_le_bytes().to_vec(),
-            endian::Encoding::Big => self.to_be_bytes().to_vec(),
-        }
+        Ok(Pointer(value))
+    }
+
+    fn to_io<T: std::io::Write>(&self, order: &endian::Encoding, output: &mut T) -> Result<usize> {
+        // let amount = output.write(&self.0.to_le_bytes())?;
+        Ok(1)
     }
 }
 
-impl Pointer for u64 {
-    fn to_bytes(&self, endian: &endian::Encoding) -> Vec<u8> {
-        match endian {
-            endian::Encoding::Little => self.to_le_bytes().to_vec(),
-            endian::Encoding::Big => self.to_be_bytes().to_vec(),
-        }
-    }
-}
-
-pub struct Header {
+#[derive(Debug)]
+pub struct Header<T> where T: PrimInt + FromPrimitive {
     ident: Identification,
     // This member of the structure identifies the object file type
     e_type: Type,
@@ -264,24 +272,17 @@ pub struct Header {
     // This member gives the virtual address to which the system
     // first transfers control, thus starting the process.  If the
     // file has no associated entry point, this member holds zero.
-    entry: Box<dyn Pointer>,
+    entry: Pointer<T>,
 }
 
-impl std::fmt::Debug for Header {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        // TODO: fill me in
-        write!(fmt, "Header {{ }}")
-    }
-}
-
-impl Header {
+impl<T> Header<T> where T: PrimInt + FromPrimitive {
     fn new(
         ident: Identification,
         e_type: Type,
         machine: Architecture,
         version: Version,
-        entry: Box<dyn Pointer>,
-    ) -> Header {
+        entry: Pointer<T>,
+    ) -> Header<T> {
         Header {
             ident,
             e_type,
@@ -292,9 +293,9 @@ impl Header {
     }
 }
 
-impl Serde<Header> for Header {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<Header> {
-        let ident = Identification::from_io(input)?;
+impl<R> Serde<Header<R>> for Header<R> where R: PrimInt + FromPrimitive {
+    fn from_io<T: std::io::Read + std::io::Seek>(order: &endian::Encoding, input: &mut T) -> Result<Header<R>> {
+        let ident = Identification::from_io(order, input)?;
         let endian = match ident.data {
             Encoding::LittleEndian => endian::Encoding::Little,
             Encoding::BigEndian => endian::Encoding::Big,
@@ -310,25 +311,15 @@ impl Serde<Header> for Header {
         let version = Version::from_u32(endian.read_u32(input)?)
             .ok_or(Error::Parse(String::from("Could not read version")))?;
 
-        match ident.class {
-            AddressFormat::ThirtyTwoBit => {
-                let entry = Box::new(endian.read_u32(input)?);
-                return Ok(
-                    Header { ident, e_type, machine, version, entry }
-                )
-            },
-            AddressFormat::SixtyFourBit => {
-                let entry = Box::new(endian.read_u64(input)?);
-                return Ok(
-                    Header { ident, e_type, machine, version, entry}
-                )
-            },
-            _ => panic!("should not be hit."),
-        };
+        let entry = Pointer::from_io(order, input)?;
+
+        Ok(
+            Header { ident, e_type, machine, version, entry }
+        )
     }
 
-    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        let written = self.ident.to_io(output)?;
+    fn to_io<T: std::io::Write>(&self, order: &endian::Encoding, output: &mut T) -> Result<usize> {
+        let mut written = self.ident.to_io(order, output)?;
 
         let endian = match self.ident.data {
             Encoding::LittleEndian => endian::Encoding::Little,
@@ -345,25 +336,23 @@ impl Serde<Header> for Header {
         let version = self.version.to_u32()
             .ok_or(Error::Parse(String::from("Could not convert version")))?;
 
-        let entry = self.entry.to_bytes(&endian);
+        written += self.entry.to_io(order, output)?;
 
         endian.write_u16(e_type, output)?;
         endian.write_u16(machine, output)?;
         endian.write_u32(version, output)?;
 
-        let written = written + output.write(&entry)?;
-
         Ok(written + 2 + 2 + 4)
     }
 }
 
-pub struct File {
-    header: Header,
+pub struct File<T> where T: PrimInt + FromPrimitive {
+    header: Header<T>,
     remaining: Vec<u8>,
 }
 
-impl File{
-    fn new(header: Header) -> File {
+impl<T> File<T> where T: PrimInt + FromPrimitive {
+    fn new(header: Header<T>) -> File<T> {
         File {
             header,
             remaining: vec![0; 0],
@@ -371,16 +360,16 @@ impl File{
     }
 }
 
-impl Serde<File> for File {
-    fn from_io<T: std::io::Read + std::io::Seek>(input: &mut T) -> Result<File> {
-        let header = Header::from_io(input)?;
+impl<R> Serde<File<R>> for File<R> where R: PrimInt + FromPrimitive {
+    fn from_io<T: std::io::Read + std::io::Seek>(order: &endian::Encoding, input: &mut T) -> Result<File<R>> {
+        let header = Header::from_io(order, input)?;
         let mut file = File::new(header);
         input.read_to_end(&mut file.remaining)?;
         Ok(file)
     }
 
-    fn to_io<T: std::io::Write>(&self, output: &mut T) -> Result<usize> {
-        let amount = self.header.to_io(output)? + output.write(&self.remaining)?;
+    fn to_io<T: std::io::Write>(&self, order: &endian::Encoding, output: &mut T) -> Result<usize> {
+        let amount = self.header.to_io(order, output)? + output.write(&self.remaining)?;
         Ok(amount)
     }
 }
@@ -393,14 +382,14 @@ mod tests {
         #[test]
         fn from_io_valid() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let mut valid = std::io::Cursor::new([EI_MAG0, EI_MAG1, EI_MAG2, EI_MAG3]);
-            Magic::from_io(&mut valid)?;
+            Magic::from_io(&endian::Encoding::Any, &mut valid)?;
             Ok(())
         }
 
         #[test]
         fn from_io_invalid() {
             let mut valid = std::io::Cursor::new("not at all invalid");
-            let result = Magic::from_io(&mut valid);
+            let result = Magic::from_io(&endian::Encoding::Any, &mut valid);
             assert!(result.is_err(), "expected error for invalid input");
         }
     }
@@ -412,11 +401,11 @@ mod tests {
         fn round_trip() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let expected = include_bytes!("hello_world.o").to_vec();
             let mut input = std::io::Cursor::new(&expected);
-            let parsed = File::from_io(&mut input)?;
+            let parsed: File<u64> = File::from_io(&endian::Encoding::Any, &mut input)?;
 
             let mut actual: Vec<u8> = vec![0; 0];
             let mut output = std::io::Cursor::new(&mut actual);
-            let written = parsed.to_io(&mut output)?;
+            let written = parsed.to_io(&endian::Encoding::Any, &mut output)?;
 
             assert_eq!(expected.len(), written);
             assert_eq!(expected, actual);
