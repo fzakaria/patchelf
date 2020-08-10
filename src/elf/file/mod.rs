@@ -56,6 +56,9 @@ type Result<T> = std::result::Result<T, Error>;
 // The size of the e_ident array.
 const EI_NIDENT: usize = 16;
 
+// the largest number phnum can have
+const PN_XNUM: u16 = 0xffff;
+
 // Elf the magic number.
 const EI_MAG0: u8 = 0x7f;
 const EI_MAG1: u8 = b'E';
@@ -266,6 +269,35 @@ pub struct Header {
     // This member holds the section header table's file offset in bytes.  If the file has no
     // section header table, this member holds zero.
     shoff: u64,
+    // This member holds processor-specific flags associated with the file.
+    // this field is unused & not modeled in this crate.
+    flags: u32,
+    // This member holds the ELF header's size in bytes.
+    ehsize: u16,
+    // This member holds the size in bytes of one entry in the file's program header table;
+    // all entries are the same size
+    phentsize: u16,
+    // This member holds the number of entries in the program header table.
+    // Thus the product of e_phentsize and e_phnum gives the table's size in bytes.
+    // If a file has no program header, e_phnum holds the value zero.
+    // If the number of entries in the program header table is larger than or equal to PN_XNUM
+    // then the real number of entries in the program header table is held in the sh_info member
+    // of the initial entry in section header table.  Otherwise, the sh_info member of the
+    // initial entry contains the value zero
+    phnum: u16,
+    // This member holds a sections header's size in bytes.  A section header is one entry in the
+    // section header table; all entries are the same size.
+    shentsize: u16,
+    // This member holds the number of entries in the section header table.
+    // Thus the product of shentsize and shnum gives the section header table's size in bytes
+    // If the number of entries in the section header table is larger than or equal to SHN_LORESERVE
+    // then shnum holds the value zero and the real number of entries in the section header table
+    // is held in the sh_size member of the initial entry in section header table. Otherwise, the
+    // sh_size member of the initial entry in the section header table holds the value zero
+    shnum: u16,
+    // This member holds the section header table index of the entry associated with the section
+    // name string table.
+    shstrndx: u16,
 }
 
 impl Header {
@@ -277,6 +309,13 @@ impl Header {
         entry: u64,
         phoff: u64,
         shoff: u64,
+        flags: u32,
+        ehsize: u16,
+        phentsize: u16,
+        phnum: u16,
+        shentsize: u16,
+        shnum: u16,
+        shstrndx: u16,
     ) -> Header {
         Header {
             ident,
@@ -286,6 +325,13 @@ impl Header {
             entry,
             phoff,
             shoff,
+            flags,
+            ehsize,
+            phentsize,
+            phnum,
+            shentsize,
+            shnum,
+            shstrndx,
         }
     }
 }
@@ -349,6 +395,16 @@ impl Serde<Header> for Header {
 
         let shoff = architecture_aware_read(&ident, &endian, input)?;
 
+        let flags = endian.read_u32(input)?;
+
+        let ehsize = endian.read_u16(input)?;
+
+        let phentsize = endian.read_u16(input)?;
+        let phnum = endian.read_u16(input)?;
+        let shentsize = endian.read_u16(input)?;
+        let shnum = endian.read_u16(input)?;
+        let shstrndx = endian.read_u16(input)?;
+
         Ok(Header {
             ident,
             e_type,
@@ -357,6 +413,13 @@ impl Serde<Header> for Header {
             entry,
             phoff,
             shoff,
+            flags,
+            ehsize,
+            phentsize,
+            phnum,
+            shentsize,
+            shnum,
+            shstrndx
         })
     }
 
@@ -394,7 +457,15 @@ impl Serde<Header> for Header {
 
         written += architecture_aware_write(&self.ident, self.shoff, &endian, output)?;
 
-        Ok(written + 2 + 2 + 4)
+        endian.write_u32(self.flags, output)?;
+        endian.write_u16(self.ehsize, output)?;
+        endian.write_u16(self.phentsize, output)?;
+        endian.write_u16(self.phnum, output)?;
+        endian.write_u16(self.shentsize, output)?;
+        endian.write_u16(self.shnum, output)?;
+        endian.write_u16(self.shstrndx, output)?;
+
+        Ok(written + 2 + 2 + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2)
     }
 }
 
