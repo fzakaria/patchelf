@@ -1,36 +1,51 @@
-use std::io::{Read, Result, Seek, Write};
-use byteorder::{ByteOrder, WriteBytesExt, ReadBytesExt, LittleEndian, BigEndian, NativeEndian};
+use byteorder::{BigEndian, LittleEndian, NativeEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Result, Write};
 
 pub enum Encoding {
     Little,
     Big,
-    Any
+    Any,
 }
 
 pub trait Reader {
-    fn read_u16<S>(&self, src: &mut S) -> Result<u16> where S: Read;
-    fn read_u32<S>(&self, src: &mut S) -> Result<u32> where S: Read;
-    fn read_u64<S>(&self, src: &mut S) -> Result<u64> where S: Read;
+    fn read_u16<S>(&self, src: &mut S) -> Result<u16>
+    where
+        S: Read;
+    fn read_u32<S>(&self, src: &mut S) -> Result<u32>
+    where
+        S: Read;
+    fn read_u64<S>(&self, src: &mut S) -> Result<u64>
+    where
+        S: Read;
 }
 
 // This trait allows ByteOrder themselves to be dynamically
 pub trait Writer {
-    fn write_u8<S>(&self, value: u8, target: &mut S) -> Result<()> where S: Write;
-    fn write_u16<S>(&self, value: u16, target: &mut S) -> Result<()> where S: Write;
-    fn write_u32<S>(&self, value: u32, target: &mut S) -> Result<()> where S: Write;
-    fn write_u64<S>(&self, value: u64, target: &mut S) -> Result<()> where S: Write;
-
+    fn write_u8<S>(&self, value: u8, target: &mut S) -> Result<()>
+    where
+        S: Write;
+    fn write_u16<S>(&self, value: u16, target: &mut S) -> Result<()>
+    where
+        S: Write;
+    fn write_u32<S>(&self, value: u32, target: &mut S) -> Result<()>
+    where
+        S: Write;
+    fn write_u64<S>(&self, value: u64, target: &mut S) -> Result<()>
+    where
+        S: Write;
 }
 
 impl Writer for Encoding {
-
     fn write_u8<S>(&self, value: u8, target: &mut S) -> Result<()>
-        where S: Write {
+    where
+        S: Write,
+    {
         target.write_u8(value)
     }
 
     fn write_u16<S>(&self, value: u16, target: &mut S) -> Result<()>
-        where S: Write,
+    where
+        S: Write,
     {
         match *self {
             Encoding::Little => target.write_u16::<LittleEndian>(value),
@@ -40,7 +55,8 @@ impl Writer for Encoding {
     }
 
     fn write_u32<S>(&self, value: u32, target: &mut S) -> Result<()>
-        where S: Write,
+    where
+        S: Write,
     {
         match *self {
             Encoding::Little => target.write_u32::<LittleEndian>(value),
@@ -50,7 +66,8 @@ impl Writer for Encoding {
     }
 
     fn write_u64<S>(&self, value: u64, target: &mut S) -> Result<()>
-        where S: Write,
+    where
+        S: Write,
     {
         match *self {
             Encoding::Little => target.write_u64::<LittleEndian>(value),
@@ -61,7 +78,6 @@ impl Writer for Encoding {
 }
 
 impl Reader for Encoding {
-
     /// Read a primitive value with this endianness from the given source.
     fn read_u16<S>(&self, src: &mut S) -> Result<u16>
     where
@@ -76,8 +92,8 @@ impl Reader for Encoding {
 
     /// Read a primitive value with this endianness from the given source.
     fn read_u32<S>(&self, src: &mut S) -> Result<u32>
-        where
-            S: Read,
+    where
+        S: Read,
     {
         match *self {
             Encoding::Little => src.read_u32::<LittleEndian>(),
@@ -88,8 +104,8 @@ impl Reader for Encoding {
 
     /// Read a primitive value with this endianness from the given source.
     fn read_u64<S>(&self, src: &mut S) -> Result<u64>
-        where
-            S: Read,
+    where
+        S: Read,
     {
         match *self {
             Encoding::Little => src.read_u64::<LittleEndian>(),
@@ -105,7 +121,7 @@ mod tests {
 
     #[test]
     fn u16_conversion() {
-        let expected :u16 = 1337;
+        let expected: u16 = 1337;
         let bytes = expected.to_be_bytes();
     }
 }
