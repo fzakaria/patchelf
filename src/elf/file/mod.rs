@@ -101,7 +101,7 @@ type IdentRemaining = [u8; Identification::len() - Magic::len() - 2];
 
 #[derive(Debug, PartialEq, FromPrimitive, ToPrimitive)]
 #[repr(u8)]
-enum AddressFormat {
+pub enum AddressFormat {
     None,
     ThirtyTwoBit,
     SixtyFourBit,
@@ -119,11 +119,11 @@ enum Encoding {
 // This array of bytes specifies to interpret the file, independent
 // of the processor or the file's remaining contents.
 #[derive(Debug)]
-struct Identification {
+pub struct Identification {
     // EI_MAGX: the magic number
     magic: Magic,
     // EI_CLASS: The fifth byte identifies the architecture
-    class: AddressFormat,
+    pub class: AddressFormat,
     // EI_DATA: The sixth byte specifies the data encoding of the processor-specific data in the file.
     data: Encoding,
     remaining: IdentRemaining,
@@ -354,7 +354,7 @@ impl<R> Serde<Header<R>> for Header<R> where R: PrimInt + FromPrimitive {
         endian.write_u32(version, output)?;
 
         written += self.entry.to_io(order, output)?;
-        
+
         Ok(written + 2 + 2 + 4)
     }
 }
