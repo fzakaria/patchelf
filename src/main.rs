@@ -32,7 +32,7 @@ where T: PrimInt + FromPrimitive
     file.seek(SeekFrom::Start(0))?;
 
     // the endian at the start of the file read does not matter; so just set it to native endian
-    let elf = match identification.class {
+    let elf: elf::file::File<T> = match identification.class {
         elf::file::AddressFormat::None => panic!("This should not happen after a successful parse"),
         elf::file::AddressFormat::ThirtyTwoBit => elf::file::File::<u32>::from_io(&encoding, file)?,
         elf::file::AddressFormat::SixtyFourBit => elf::file::File::<u64>::from_io(&encoding, file)?,
@@ -66,7 +66,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let path = &matches.free[0];
 
     let mut binary = std::fs::File::open(path)?;
-    let elf = parse_elf_file(&mut binary);
+    let elf = parse_elf_file(&mut binary)?;
 
     let mut output = std::fs::File::create("/tmp/output")?;
 
