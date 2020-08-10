@@ -256,8 +256,21 @@ impl<R> Serde<Pointer<R>> for Pointer<R> where R: PrimInt + FromPrimitive {
     }
 
     fn to_io<T: std::io::Write>(&self, order: &endian::Encoding, output: &mut T) -> Result<usize> {
-        // let amount = output.write(&self.0.to_le_bytes())?;
-        Ok(1)
+        let width = R::zero().count_zeros();
+        match width {
+            32 => {
+                let value = self.0.to_u32().expect("This cannot happen.");
+                order.write_u32(value, output)?;
+                Ok(4)
+            },
+            64 => {
+                let value = self.0.to_u64().expect("This cannot happen.");
+                order.write_u64(value, output)?;
+                Ok(8)
+            }
+            _ => Err(Parse(String::from("Could not convert to primitive type")))
+        }
+
     }
 }
 

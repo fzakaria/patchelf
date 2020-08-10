@@ -18,6 +18,7 @@ pub trait Writer {
     fn write_u8<S>(&self, value: u8, target: &mut S) -> Result<()> where S: Write;
     fn write_u16<S>(&self, value: u16, target: &mut S) -> Result<()> where S: Write;
     fn write_u32<S>(&self, value: u32, target: &mut S) -> Result<()> where S: Write;
+    fn write_u64<S>(&self, value: u64, target: &mut S) -> Result<()> where S: Write;
 
 }
 
@@ -45,6 +46,16 @@ impl Writer for Encoding {
             Encoding::Little => target.write_u32::<LittleEndian>(value),
             Encoding::Big => target.write_u32::<BigEndian>(value),
             Encoding::Any => target.write_u32::<NativeEndian>(value),
+        }
+    }
+
+    fn write_u64<S>(&self, value: u64, target: &mut S) -> Result<()>
+        where S: Write,
+    {
+        match *self {
+            Encoding::Little => target.write_u64::<LittleEndian>(value),
+            Encoding::Big => target.write_u64::<BigEndian>(value),
+            Encoding::Any => target.write_u64::<NativeEndian>(value),
         }
     }
 }
