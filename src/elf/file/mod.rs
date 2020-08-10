@@ -336,11 +336,6 @@ impl Header {
     }
 }
 
-impl Header {
-
-
-}
-
 // Read the next input either as 32bit or 64bit according to the Identification
 fn architecture_aware_read<T: std::io::Read + std::io::Seek>(ident: &Identification, endian: &endian::Encoding, input: &mut T) -> Result<u64> {
     match ident.class {
